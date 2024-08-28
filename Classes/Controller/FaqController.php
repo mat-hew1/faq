@@ -7,210 +7,161 @@ declare(strict_types = 1);
 
 namespace HDNET\Faq\Controller;
 
-use HDNET\Faq\Domain\Model\Question;
-use HDNET\Faq\Domain\Model\Request\Faq;
-use HDNET\Faq\Domain\Model\Request\QuestionRequest;
-use TYPO3\CMS\Core\Utility\GeneralUtility;
+use HDNET\Autoloader\Annotation\Plugin;
+use HDNET\Faq\Domain\Model\QuestionCategory;
+use HDNET\Faq\Domain\Repository\QuestionCategoryRepository;
+use HDNET\Faq\Domain\Repository\QuestionRepository;
+use HDNET\Faq\Service\SchemaService;
+use Psr\Http\Message\ResponseInterface;
+use TYPO3\CMS\Core\Pagination\SimplePagination;
+use TYPO3\CMS\Extbase\Pagination\QueryResultPaginator;
 
 /**
  * FAQ.
  */
 class FaqController extends AbstractController
 {
-    const TEASER_MODE_VOTING = 0;
+    protected QuestionRepository $questionRepository;
 
-    const TEASER_MODE_CUSTOM = 1;
+    protected QuestionCategoryRepository $questionCategoryRepository;
 
-    /**
-     * Question repository.
-     *
-     * @var \HDNET\Faq\Domain\Repository\QuestionRepository
-     * @inject
-     * @TYPO3\CMS\Extbase\Annotation\Inject
-     */
-    protected $questionRepository;
+    protected SchemaService $schemaService;
 
-    /**
-     * Question category repository.
-     *
-     * @var \HDNET\Faq\Domain\Repository\QuestioncategoryRepository
-     * @inject
-     * @TYPO3\CMS\Extbase\Annotation\Inject
-     */
-    protected $questioncategoryRepository;
+    protected bool $addSchemaHeader = false;
+
+    public function __construct(
+        QuestionRepository $questionRepository,
+        QuestionCategoryRepository $questionCategoryRepository,
+        SchemaService $schemaService
+    ) {
+        $this->questionRepository = $questionRepository;
+        $this->questionCategoryRepository = $questionCategoryRepository;
+        $this->schemaService = $schemaService;
+
+        $this->addSchemaHeader = (bool)($this->settings['faq']['addSchmemaOrgHeader'] ?? true);
+    }
 
     /**
-     * Index action.
-     *
-     * @param \HDNET\Faq\Domain\Model\Request\Faq $faq
-     * @param bool                                $showAll
+     * @Plugin("Faq")
      */
-    public function indexAction(Faq $faq = null, $showAll = false)
+    public function indexAction(QuestionCategory $category = null): ResponseInterface
     {
-        $topCategory = (int)$this->settings['faq']['topCategory'];
-
-        if (true === (bool)$this->settings['overrideShowAll']) {
-            $showAll = true;
+        $categoryUid = $category ? (int)$category->getUid() : (int)($this->settings['initialCategory'] ?? 0);
+        $categoryChildren = $this->questionCategoryRepository->findByParent($categoryUid);
+        $questionsPerSubCategory = [];
+        $allQuestions = [];
+        $questions = null;
+        if (!empty($categoryChildren->toArray())) {
+            $allQuestions = $this->questionRepository->findByCategories($categoryChildren);
         }
-        if (0 !== (int)$this->settings['overrideTopCategory']) {
-            $topCategory = (int)$this->settings['overrideTopCategory'];
+
+        foreach ($categoryChildren as $subCategory) {
+            $questions = $this->questionRepository->findByCategories([$subCategory]);
+            if (0 !== $questions->count()) {
+                $questionsPerSubCategory[] = [
+                    'category' => $subCategory,
+                    'questions' => $questions,
+                ];
+            }
         }
 
-        if (\is_object($faq)) {
-            $questions = $this->questionRepository->findByFaq($faq, $topCategory);
-            $showResults = true;
-        } elseif ($showAll) {
-            $showResults = true;
-            $questions = $this->questionRepository->findAll($topCategory);
+        if ($this->addSchemaHeader) {
+            $this->schemaService->addSchemaOrgHeader($allQuestions);
+        }
+
+        if ($this->request->getQueryParams()['tx_faq_faq']['currentPage'] ?? null) {
+            $currentPage = (int)($this->request->getQueryParams()['tx_faq_faq']['currentPage']);
         } else {
-            $questions = [];
-            $showResults = false;
+            $currentPage = 1;
         }
 
-        if (self::TEASER_MODE_VOTING === (int)$this->settings['topMode']) {
-            $topQuestions = $this->questionRepository->findTop(
-                (int)$this->settings['faq']['limitTop'],
-                $topCategory,
-                GeneralUtility::intExplode(',', $this->settings['faq']['topQuestions'], true)
-            );
-        } else {
-            $topQuestions = $this->questionRepository->findByUidsSorted(GeneralUtility::intExplode(
-                ',',
-                $this->settings['custom'],
-                true
-            ));
-        }
-
-        if (null === $faq) {
-            $faq = $this->objectManager->get(Faq::class);
+        $paginator = null;
+        $pagination = null;
+        if ($questions) {
+            $paginator = new QueryResultPaginator($questions, $currentPage, (int)$this->settings['faq']['itemsPerPage']);
+            $pagination = new SimplePagination($paginator);
         }
 
         $this->view->assignMultiple([
-            'showResults' => $showResults,
-            'faq' => $faq,
-            'questions' => $questions,
-            'newQuestions' => $this->questionRepository->findNewest(
-                (int)$this->settings['faq']['limitNewest'],
-                $topCategory
-            ),
-            'topQuestions' => $topQuestions,
-            'categories' => $this->questioncategoryRepository->findByParent(
-                $topCategory,
-                (bool)$this->settings['faq']['categorySort'] ?: false
-            ),
+            'category' => $category,
+            'questions' => $allQuestions,
+            'subCategories' => $questionsPerSubCategory,
+            'paginator' => $paginator,
+            'pagination' => $pagination,
+            'pages' => $pagination ? range(1, $pagination->getLastPageNumber()) : [],
+            'categories' => $this->questionCategoryRepository->findByParent(0),
         ]);
+
+        return $this->htmlResponse();
     }
 
     /**
-     * Render the teaser action.
+     * @Plugin("FaqAll")
      */
-    public function teaserAction()
+    public function allAction(): ResponseInterface
     {
-        $topQuestions = GeneralUtility::intExplode(',', $this->settings['faq']['topQuestions'], true);
-        $teaserCategories = GeneralUtility::intExplode(',', $this->settings['faq']['teaserCategories'], true);
-        $teaserLimit = (int)$this->settings['faq']['teaserLimit'];
-        $questions = $this->questionRepository->findByTeaserConfiguration(
-            $topQuestions,
-            $teaserCategories,
-            $teaserLimit
-        );
-        $this->view->assign('questions', $questions);
-    }
+        $parentCategories = $this->questionCategoryRepository->findAllParentCategories();
+        $questionsPerCategory = [];
 
-    /**
-     * Render the detail action.
-     *
-     * @param \HDNET\Faq\Domain\Model\Question $question
-     */
-    public function detailAction(Question $question)
-    {
-        $this->view->assign('question', $question);
-    }
-
-    /**
-     * Enter form.
-     *
-     * @param \HDNET\Faq\Domain\Model\Request\QuestionRequest $question
-     * @ignorevalidation $question
-     * @TYPO3\CMS\Extbase\Annotation\IgnoreValidation $question
-     */
-    public function formAction(QuestionRequest $question = null)
-    {
-        if (null === $question) {
-            $question = new QuestionRequest();
+        /** @var QuestionCategory $parentCategory */
+        foreach ($parentCategories as $parentCategory) {
+            $questionsPerCategory[] = $this->getQuestionRec($parentCategory);
         }
 
-        $this->view->assign('question', $question);
-    }
-
-    /**
-     * Send action.
-     *
-     * @param \HDNET\Faq\Domain\Model\Request\QuestionRequest $question
-     * @param string                                          $captcha
-     *
-     * @throws \TYPO3\CMS\Extbase\Mvc\Exception\StopActionException
-     */
-    public function sendAction(QuestionRequest $question, $captcha = null)
-    {
-        // @todo integrate captcha based on $this->settings['enableCaptcha']
-        // * @validate $captcha \SJBR\SrFreecap\Validation\Validator\CaptchaValidator && Not Empty
-        $this->disableIndexing();
-
-        $targetEmailAddress = $this->getTargetEmailAddress();
-        if (GeneralUtility::validEmail($targetEmailAddress)) {
-            $this->view->assign('to', [$targetEmailAddress => $targetEmailAddress]);
-            $this->view->assign('subject', 'Neue Frage eingestellt');
-            $this->view->assign('question', $question);
-            $this->view->assign('captcha', $captcha);
-            $this->view->render();
+        if ($this->addSchemaHeader) {
+            $allQuestions = $this->questionRepository->findAll();
+            $this->schemaService->addSchemaOrgHeader($allQuestions);
         }
-        $this->forward('user');
+
+        $this->view->assignMultiple([
+            'questionsPerCategory' => $questionsPerCategory,
+            'categories' => $this->questionCategoryRepository->findByParent(0),
+        ]);
+
+        return $this->htmlResponse();
     }
 
     /**
-     * user action.
-     *
-     * @param \HDNET\Faq\Domain\Model\Request\QuestionRequest $question
-     *
-     * @throws \TYPO3\CMS\Extbase\Mvc\Exception\StopActionException
+     * @Plugin("FaqSingleCategory")
      */
-    public function userAction(QuestionRequest $question)
+    public function singleCategoryAction(): ResponseInterface
     {
-        if (GeneralUtility::validEmail($question->getEmail())) {
-            $this->view->assignMultiple([
-                'subject' => 'FAQ eingereicht',
-                'to' => [$question->getEmail() => $question->getEmail()],
-                'question' => $question,
-            ]);
-            $this->view->render();
+        $errors = [];
+        $category = null;
+        $questions = [];
+        $categoryUid = $this->settings['initialCategory'];
+
+        if ('' === $categoryUid) {
+            $errors[] = 'plugin.FaqSingleCategory.errors.noCategorySelected';
+        } else {
+            $category = $this->questionCategoryRepository->findByUid($categoryUid);
+            $questions = $this->questionRepository->findByCategory($category);
         }
-        $this->forward('thanks');
+
+        $this->view->assignMultiple([
+            'category' => $category,
+            'questions' => $questions,
+            'errors' => $errors,
+        ]);
+
+        return $this->htmlResponse();
     }
 
-    /**
-     * Send action.
-     *
-     * @param \HDNET\Faq\Domain\Model\Request\QuestionRequest $question
-     */
-    public function thanksAction(QuestionRequest $question)
+    private function getQuestionRec(QuestionCategory $category)
     {
-        $this->disableIndexing();
-        $this->view->assign('question', $question);
-    }
-
-    /**
-     * Get the target Email address.
-     *
-     * @throws \Exception
-     *
-     * @return string
-     */
-    protected function getTargetEmailAddress()
-    {
-        if (isset($this->settings['faq']['targetEmail']) && GeneralUtility::validEmail(\trim((string)$this->settings['faq']['targetEmail']))) {
-            return \trim((string)$this->settings['faq']['targetEmail']);
+        $childCategories = $this->questionCategoryRepository->findByParent($category->getUid())->toArray();
+        $element = [
+            'category' => $category,
+            'questions' => $this->questionRepository->findByCategory($category)->toArray(),
+        ];
+        if ($childCategories) {
+            $childElements = [];
+            foreach ($childCategories as $childCategory) {
+                $childElements[] = $this->getQuestionRec($childCategory);
+            }
+            $element['childElements'] = $childElements;
         }
-        throw new \Exception('No target e-mail address found', 123718231823);
+
+        return $element;
     }
 }

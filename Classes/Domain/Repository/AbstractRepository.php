@@ -24,15 +24,13 @@ abstract class AbstractRepository extends Repository
      * Return the current tablename.
      *
      * @throws Exception
-     *
-     * @return string
      */
-    public function getTableName()
+    public function getTableName(): string
     {
         $query = $this->createQuery();
         if ($query instanceof Query) {
             $source = $query->getSource();
-            if (\method_exists($source, 'getSelectorName')) {
+            if (method_exists($source, 'getSelectorName')) {
                 return $source->getSelectorName();
             }
         }
@@ -42,10 +40,8 @@ abstract class AbstractRepository extends Repository
 
     /**
      * Find objects by the given ids in the given order.
-     *
-     * @return array
      */
-    public function findByUidsSorted(array $uids)
+    public function findByUidsSorted(array $uids): array
     {
         $return = [];
         foreach ($uids as $uid) {

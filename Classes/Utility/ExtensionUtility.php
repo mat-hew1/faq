@@ -2,10 +2,6 @@
 
 declare(strict_types = 1);
 
-/**
- * ExtensionUtility.
- */
-
 namespace HDNET\Faq\Utility;
 
 /**
@@ -15,10 +11,8 @@ class ExtensionUtility
 {
     /**
      * Get the autoloader configuration.
-     *
-     * @return array
      */
-    public static function getAutoloaderConfiguration()
+    public static function getAutoloaderConfiguration(): array
     {
         return [
             'SmartObjects',
@@ -26,6 +20,7 @@ class ExtensionUtility
             'FlexForms',
             'StaticTyposcript',
             'ExtensionId',
+            'Plugins',
         ];
     }
 }

@@ -1,14 +1,17 @@
 <?php
 
 declare(strict_types = 1);
+
 use HDNET\Autoloader\Utility\ArrayUtility;
 use HDNET\Autoloader\Utility\ModelUtility;
 use HDNET\Faq\Domain\Model\Question;
+use TYPO3\CMS\Core\Configuration\ExtensionConfiguration;
+use TYPO3\CMS\Core\Utility\GeneralUtility;
 
 $base = ModelUtility::getTcaInformation(Question::class);
 
-$configuration = (array)@\unserialize((string) $GLOBALS['TYPO3_CONF_VARS']['EXT']['extConf']['faq']);
-$enableManuallySorting = isset($configuration['enableManuallySorting']) ? (bool) $configuration['enableManuallySorting'] : false;
+$extensionConfiguration = GeneralUtility::makeInstance(ExtensionConfiguration::class)->get('faq');
+$enableManuallySorting = $extensionConfiguration['enableManuallySorting'] ?? false;
 
 $custom = [
     'ctrl' => [
@@ -24,13 +27,13 @@ $custom = [
             'config' => [
                 'type' => 'text',
             ],
-            'defaultExtras' => 'richtext:rte_transform[flag=rte_enabled|mode=ts_css]',
         ],
         'categories' => [
             'config' => [
                 'type' => 'select',
                 'renderType' => 'selectTree',
                 'foreign_table' => 'tx_faq_domain_model_questioncategory',
+                'foreign_table_where' => 'tx_faq_domain_model_questioncategory.sys_language_uid IN (0,-1)',
                 'maxitems' => 999,
                 'minitems' => 1,
                 'MM' => 'tx_faq_mm_question_questioncategory',
@@ -41,6 +44,11 @@ $custom = [
             ],
         ],
         '_languageUid' => [
+            'config' => [
+                'type' => 'passthrough',
+            ],
+        ],
+        'crdate' => [
             'config' => [
                 'type' => 'passthrough',
             ],

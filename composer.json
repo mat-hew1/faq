@@ -24,9 +24,20 @@
       "homepage": "https://github.com/lochmueller"
     }
   ],
+  "repositories": [
+    {
+      "type": "vcs",
+      "url": "git@gitlab.com:Sineos/general/lochmueller-autoloader.git",
+      "options": {
+        "versions": {
+          "lochmueller/autoloader": "8.0.0"
+        }
+      }
+    }
+  ],
   "require": {
     "php": "^7.4||^8.0",
-    "lochmueller/autoloader": "^7.2",
+    "lochmueller/autoloader": "^8.0",
     "typo3/cms-core": "^11.5||^12.3"
   },
   "replace": {
